@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-math-reasoning-env"
+version = "1.0.0"
+description = "Math Reasoning Environment for OpenEnv — multi-step math RL environment for LLM training"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+authors = [
+    { name = "Aanand Tiwari" }
+]
+keywords = ["reinforcement-learning", "math", "reasoning", "openenv", "llm", "rl"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD Software License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "openenv-core[core]>=0.2.2",
+    "fastapi>=0.115.0",
+    "pydantic>=2.0.0",
+    "uvicorn>=0.24.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "httpx>=0.25.0",
+]
+
+[project.scripts]
+server = "math_reasoning_env.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["math_reasoning_env", "math_reasoning_env.server"]
+package-dir = { "math_reasoning_env" = ".", "math_reasoning_env.server" = "server" }
