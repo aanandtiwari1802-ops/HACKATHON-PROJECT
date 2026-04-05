@@ -1,3 +1,13 @@
+---
+title: Math Reasoning Env
+emoji: 🧮
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # Math Reasoning Environment 🧮
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compatible-blue)](https://github.com/meta-pytorch/OpenEnv)
