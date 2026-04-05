@@ -25,7 +25,7 @@ import uuid
 from typing import Any, Optional
 
 try:
-    from openenv.core.env_server.environment import Environment
+    from openenv.core import Environment
     from openenv.core.env_server.types import Action, Observation, State
 except ImportError:
     from dataclasses import dataclass, field
