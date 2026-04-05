@@ -435,3 +435,7 @@ class MathReasoningEnvironment(Environment):
     def state(self) -> MathState:
         """Return current episode state."""
         return self._state
+
+    def close(self) -> None:
+        """Clean up resources, if any. Required by OpenEnv core validation."""
+        pass
