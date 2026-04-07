@@ -120,12 +120,19 @@ else:
     from models import MathAction, MathObservation
     from server.math_environment import MathReasoningEnvironment
 
+    env_instance = MathReasoningEnvironment()
     app = create_app(
-        MathReasoningEnvironment,
+        lambda: env_instance,
         MathAction,
         MathObservation,
         env_name="math_reasoning_env",
     )
+
+    from fastapi.responses import JSONResponse
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request, exc):
+        import traceback
+        return JSONResponse(status_code=500, content={"traceback": traceback.format_exc()})
 
     def main():
         import uvicorn

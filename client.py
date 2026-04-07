@@ -143,8 +143,10 @@ except ImportError:
 
         def step(self, action: MathAction) -> _StepResult:
             payload = {
-                "reasoning": action.reasoning,
-                "answer": action.answer,
+                "action": {
+                    "reasoning": action.reasoning,
+                    "answer": action.answer,
+                }
             }
             r = self._session.post(f"{self.base_url}/step", json=payload)
             r.raise_for_status()
