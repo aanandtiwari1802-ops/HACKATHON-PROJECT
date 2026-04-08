@@ -136,13 +136,13 @@ def main():
 
     # ── Emit structured output ────────────────────────────────────────────────
     # [START] — exactly once
-    emit(f"[START] task={TASK_NAME}")
+    emit(f"[START] {json.dumps({'task': TASK_NAME})}")
 
     # [STEP] — one per step
     total_reward = 0.0
     last_step    = 0
     for step_num, reward in step_results:
-        emit(f"[STEP] step={step_num} reward={reward:.4f}")
+        emit(f"[STEP] {json.dumps({'step': step_num, 'reward': round(reward, 4)})}")
         total_reward += reward
         last_step = step_num
 
@@ -150,7 +150,7 @@ def main():
     score = final_score if final_score is not None else (
         total_reward / last_step if last_step > 0 else 0.0
     )
-    emit(f"[END] task={TASK_NAME} score={score:.4f} steps={last_step}")
+    emit(f"[END] {json.dumps({'task': TASK_NAME, 'score': round(score, 4), 'steps': last_step})}")
 
     log(f"[INFO] Done. total_reward={total_reward:.4f} score={score:.4f}")
 
