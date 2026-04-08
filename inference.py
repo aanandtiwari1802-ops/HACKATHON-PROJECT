@@ -20,54 +20,63 @@ except ImportError:
 
 def main():
     # Allow overriding the environment URL via environment variables
-    # Useful for testing the Hugging Face space remotely.
     env_url = os.environ.get("ENV_URL", "http://localhost:8000")
-    print(f"Connecting to OpenEnv environment at: {env_url}\n")
+    print(f"Connecting to OpenEnv environment at: {env_url}", file=sys.stderr, flush=True)
     
     # Use the synchronous client wrapper
     try:
+        # Use a task name that matches the environment
+        task_name = "math_reasoning_env"
+        
+        # [START] block must be first in stdout
+        print(f"[START] task_id={task_name}", flush=True)
+        
         with MathReasoningEnv(base_url=env_url).sync() as env:
             # 1. Reset the environment
-            task_name = "math_reasoning_task"
             result = env.reset(difficulty="easy")
-            print(f"[START] task={task_name}", flush=True)
-            print(f"New Problem: {result.observation.problem}")
+            print(f"New Problem: {result.observation.problem}", file=sys.stderr, flush=True)
             
             # 2. Simulate model inference loop
             step_num = 0
+            total_reward = 0.0
             for i in range(3):
                 step_num = i + 1
-                print(f"\n--- Step {step_num} ---")
                 
                 # Dummy reasoning and answer for inference test
                 dummy_action = MathAction(
-                    reasoning=f"I'm thinking step-by-step for attempt {step_num}...",
-                    answer="42"
+                    reasoning=f"Step-by-step thinking for attempt {step_num}...",
+                    answer="42"  # This will likely be wrong but that's fine for inference tests
                 )
                 
                 # Submit the action
                 result = env.step(dummy_action)
+                step_reward = result.reward if result.reward is not None else 0.0
+                total_reward += step_reward
                 
-                print(f"[STEP] step={step_num} reward={result.reward}", flush=True)
-                print(f"Feedback: {result.observation.feedback}")
-                print(f"Reward: {result.reward}")
-                print(f"Done: {result.done}")
+                # [STEP] block in stdout
+                print(f"[STEP] step={step_num} reward={step_reward}", flush=True)
+                
+                # Logs to stderr
+                print(f"Feedback: {result.observation.feedback}", file=sys.stderr, flush=True)
+                print(f"Done: {result.done}", file=sys.stderr, flush=True)
                 
                 if result.done:
-                    print("Episode finished!")
                     break
                     
-            # 3. Print final episode state
+            # 3. Final state and [END] block
             final_state = env.state()
-            print(f"\n[END] task={task_name} score={final_state.score} steps={step_num}", flush=True)
-            print(f"Final Score: {final_state.score}")
-            print(f"Total Episodes: {final_state.total_episodes}")
+            # [END] block in stdout: use task_id and total_reward
+            print(f"[END] task_id={task_name} reward={total_reward} steps={step_num}", flush=True)
+            
+            print(f"Final Score: {final_state.score}", file=sys.stderr, flush=True)
+
     except Exception as e:
+        # Error logs to stderr
         if hasattr(e, 'response') and e.response is not None:
-            print(f"HTTP Error: {e.response.status_code}")
-            print(f"Detail: {e.response.text}")
+            print(f"HTTP Error: {e.response.status_code}", file=sys.stderr, flush=True)
+            print(f"Detail: {e.response.text}", file=sys.stderr, flush=True)
         else:
-            print(f"Error: {e}")
+            print(f"Error: {e}", file=sys.stderr, flush=True)
         sys.exit(1)
 
 if __name__ == "__main__":

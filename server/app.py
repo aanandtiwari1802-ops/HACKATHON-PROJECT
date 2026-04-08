@@ -48,7 +48,12 @@ except ImportError:
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "env": "math_reasoning_env"}
+        return {
+            "status": "ok",
+            "env": "math_reasoning_env",
+            "version": "1.0.0",
+            "protocol": "openenv-0.2.0"
+        }
 
     @app.post("/reset")
     def reset(seed: int | None = None, difficulty: str | None = None):
@@ -70,9 +75,12 @@ except ImportError:
 
     @app.post("/step")
     def step(action: dict):
+        # Handle both flat and nested payloads for robustness
+        data = action.get("action", action) if isinstance(action.get("action"), dict) else action
+        
         act = MathAction(
-            reasoning=action.get("reasoning", ""),
-            answer=action.get("answer", ""),
+            reasoning=data.get("reasoning", ""),
+            answer=data.get("answer", ""),
         )
         obs = env.step(act)
         return {
