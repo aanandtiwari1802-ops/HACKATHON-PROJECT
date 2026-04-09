@@ -117,47 +117,38 @@ def steps_from_simulation():
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main():
-    env_url = os.environ.get("ENV_URL", "").strip()
+env_url = os.environ.get("ENV_URL", "").strip()
 
-    # Decide which backend to use
-    step_results = None
-    final_score  = None
+# Decide which backend to use
+step_results = None
+final_score  = None
 
-    if env_url:
-        log(f"[INFO] Trying live env at {env_url}")
-        step_results, final_score = steps_from_live(env_url)
-        if step_results is None:
-            log("[INFO] Live env failed. Using simulation.")
-
+if env_url:
+    log(f"[INFO] Trying live env at {env_url}")
+    step_results, final_score = steps_from_live(env_url)
     if step_results is None:
-        log("[INFO] Running simulation.")
-        step_results, final_score = steps_from_simulation()
+        log("[INFO] Live env failed. Using simulation.")
 
-    # ── Emit structured output ────────────────────────────────────────────────
-    # ── Emit structured output ────────────────────────────────────────────────
-    # The validator appears to strictly require comma-separated elements on a single line
-    # based on its literal error format: "e.g. [START] task=NAME, [STEP] step=1 reward=0.5..."
-    output_parts = [f"[START] task={TASK_NAME}"]
+if step_results is None:
+    log("[INFO] Running simulation.")
+    step_results, final_score = steps_from_simulation()
 
-    # [STEP] — one per step
-    total_reward = 0.0
-    last_step    = 0
-    for step_num, reward in step_results:
-        output_parts.append(f"[STEP] step={step_num} reward={round(reward, 4)}")
-        total_reward += reward
-        last_step = step_num
+# ── Emit structured output ────────────────────────────────────────────────
+# Outputting strictly on separate lines exactly as standard logs expect.
+emit(f"[START] task={TASK_NAME}")
 
-    # [END] — exactly once
-    score = final_score if final_score is not None else (
-        total_reward / last_step if last_step > 0 else 0.0
-    )
-    output_parts.append(f"[END] task={TASK_NAME} score={round(score, 4)} steps={last_step}")
-    
-    emit(", ".join(output_parts))
+# [STEP] — one per step
+total_reward = 0.0
+last_step    = 0
+for step_num, reward in step_results:
+    emit(f"[STEP] step={step_num} reward={round(reward, 4)}")
+    total_reward += reward
+    last_step = step_num
 
-    log(f"[INFO] Done. total_reward={total_reward:.4f} score={score:.4f}")
+# [END] — exactly once
+score = final_score if final_score is not None else (
+    total_reward / last_step if last_step > 0 else 0.0
+)
+emit(f"[END] task={TASK_NAME} score={round(score, 4)} steps={last_step}")
 
-
-if __name__ == "__main__":
-    main()
+log(f"[INFO] Done. total_reward={total_reward:.4f} score={score:.4f}")
