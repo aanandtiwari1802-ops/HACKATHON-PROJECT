@@ -135,14 +135,16 @@ def main():
         step_results, final_score = steps_from_simulation()
 
     # ── Emit structured output ────────────────────────────────────────────────
-    # [START] — exactly once
-    emit(f"[START] task={TASK_NAME}")
+    # ── Emit structured output ────────────────────────────────────────────────
+    # The validator appears to strictly require comma-separated elements on a single line
+    # based on its literal error format: "e.g. [START] task=NAME, [STEP] step=1 reward=0.5..."
+    output_parts = [f"[START] task={TASK_NAME}"]
 
     # [STEP] — one per step
     total_reward = 0.0
     last_step    = 0
     for step_num, reward in step_results:
-        emit(f"[STEP] step={step_num} reward={round(reward, 4)}")
+        output_parts.append(f"[STEP] step={step_num} reward={round(reward, 4)}")
         total_reward += reward
         last_step = step_num
 
@@ -150,7 +152,9 @@ def main():
     score = final_score if final_score is not None else (
         total_reward / last_step if last_step > 0 else 0.0
     )
-    emit(f"[END] task={TASK_NAME} score={round(score, 4)} steps={last_step}")
+    output_parts.append(f"[END] task={TASK_NAME} score={round(score, 4)} steps={last_step}")
+    
+    emit(", ".join(output_parts))
 
     log(f"[INFO] Done. total_reward={total_reward:.4f} score={score:.4f}")
 
