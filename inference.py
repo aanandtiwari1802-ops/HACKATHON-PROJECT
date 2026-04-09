@@ -30,12 +30,13 @@ SIM_STEPS = [
 
 def emit(msg: str) -> None:
     """Print to stdout and flush immediately."""
-    print(msg, flush=True)
+    sys.stdout.write(msg + "\n")
+    sys.stdout.flush()
 
 
 def log(msg: str) -> None:
-    """Print to stderr (ignored by validator)."""
-    print(msg, file=sys.stderr, flush=True)
+    """Print to stderr (ignored by validator) - DISABLED to prevent stream merging issues."""
+    pass
 
 
 # ── Step runners  ─────────────────────────────────────────────────────────────
