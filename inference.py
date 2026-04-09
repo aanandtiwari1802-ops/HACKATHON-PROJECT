@@ -30,8 +30,7 @@ SIM_STEPS = [
 
 def emit(msg: str) -> None:
     """Print to stdout and flush immediately."""
-    sys.stdout.write(msg + "\n")
-    sys.stdout.flush()
+    print(msg, flush=True)
 
 
 def log(msg: str) -> None:
