@@ -68,18 +68,21 @@ def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    action_safe = action.replace("\n", " ").replace("\r", "")[:120]
-    error_val   = error.replace("\n", " ") if error else "null"
+    # Escape quotes and collapse newlines for a safe quoted string
+    action_safe = action.replace("\n", " ").replace("\r", "").replace('"', "'")[:120]
+    error_val   = f'"{error.replace("\n", " ")}"' if error else "null"
+    # Use str(bool) for Title Case "True/False" as expected by some Python-based parsers
     print(
-        f"[STEP] step={step} action={action_safe} "
-        f"reward={reward:.2f} done={str(done).lower()} error={error_val}",
+        f'[STEP] step={step} action="{action_safe}" '
+        f'reward={reward:.2f} done={str(bool(done))} error={error_val}',
         flush=True,
     )
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    # Ensure success is Title Case (True/False)
     print(
-        f"[END] task={TASK_NAME} success={str(success).lower()} steps={steps} "
+        f"[END] task={TASK_NAME} success={str(bool(success))} steps={steps} "
         f"score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
