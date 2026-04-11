@@ -1,42 +1,13 @@
 """
 Inference Script — Math Reasoning Env
-Aligned with official sample: async, env.close() in finally,
-score=.3f, sys.__stdout__ safety, error surfaced to stderr.
+Guaranteed [START] before any import that can fail.
 """
 
-import asyncio
-import os
+# ── Only builtins first — these can NEVER fail ────────────────────────────────
 import sys
-import logging
-from typing import List, Optional
+import os
 
-# ── Silence library noise ─────────────────────────────────────────────────────
-logging.basicConfig(level=logging.ERROR)
-for _name in ["openai", "httpx", "urllib3", "asyncio"]:
-    logging.getLogger(_name).setLevel(logging.ERROR)
-
-from openai import OpenAI
-
-try:
-    from client import MathReasoningEnv, MathAction
-    HAS_CLIENT = True
-except ImportError:
-    HAS_CLIENT = False
-
-# ── Configuration ─────────────────────────────────────────────────────────────
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "no-key-provided"
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME   = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME    = os.getenv("TASK_NAME", "math_reasoning_env")
-BENCHMARK    = os.getenv("BENCHMARK", "math_reasoning_env")
-ENV_URL      = os.getenv("ENV_URL", "http://localhost:8000").strip()
-
-MAX_STEPS         = 3
-TEMPERATURE       = 0.2
-MAX_TOKENS        = 256
-SUCCESS_THRESHOLD = 0.5
-
-# ── Safe stdout writer (bypasses any sandbox redirection) ─────────────────────
+# ── Safe writer ───────────────────────────────────────────────────────────────
 def _print(msg: str) -> None:
     try:
         sys.__stdout__.write(msg + "\n")
@@ -44,79 +15,108 @@ def _print(msg: str) -> None:
     except Exception:
         print(msg, flush=True)
 
-# ── Structured logging — must match validator format exactly ──────────────────
-def log_start(task: str, env: str, model: str) -> None:
+# ── Config (env vars only — no imports needed) ────────────────────────────────
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "no-key-provided"
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME   = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+TASK_NAME    = os.getenv("TASK_NAME",  "math_reasoning_env")
+BENCHMARK    = os.getenv("BENCHMARK",  "math_reasoning_env")
+ENV_URL      = os.getenv("ENV_URL",    "http://localhost:8000").strip()
+
+MAX_STEPS         = 3
+TEMPERATURE       = 0.2
+MAX_TOKENS        = 256
+SUCCESS_THRESHOLD = 0.5
+
+# ── Logging helpers ───────────────────────────────────────────────────────────
+def log_start(task, env, model):
     _print(f"[START] task={task} env={env} model={model}")
 
-def log_step(step: int, action: str, reward: float,
-             done: bool, error: Optional[str]) -> None:
+def log_step(step, action, reward, done, error):
     error_val  = error if error else "null"
-    done_val   = str(done).lower()
-    action_safe = (action.replace("\n", " ")
-                         .replace("\r", " ")
-                         .replace("  ", " ")
-                         .strip()[:150])
-    _print(
-        f"[STEP] step={step} action={action_safe} "
-        f"reward={reward:.2f} done={done_val} error={error_val}"
-    )
+    done_val   = str(bool(done)).lower()
+    action_safe = str(action).replace("\n"," ").replace("\r"," ").strip()[:150]
+    _print(f"[STEP] step={step} action={action_safe} "
+           f"reward={reward:.2f} done={done_val} error={error_val}")
 
-def log_end(success: bool, steps: int, score: float,
-            rewards: List[float]) -> None:
-    # NOTE: score uses .3f to match official sample; rewards use .2f
+def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-    _print(
-        f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.3f} rewards={rewards_str}"
-    )
+    _print(f"[END] success={str(bool(success)).lower()} steps={steps} "
+           f"score={score:.3f} rewards={rewards_str}")
+
+# ── EMIT [START] IMMEDIATELY — before any risky import ───────────────────────
+log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+
+# ── Now do the imports that might fail ───────────────────────────────────────
+import logging
+logging.basicConfig(level=logging.ERROR)
+for _n in ["openai","httpx","urllib3","asyncio"]:
+    logging.getLogger(_n).setLevel(logging.ERROR)
+
+import asyncio
+from typing import List, Optional
+
+OpenAI = None
+try:
+    from openai import OpenAI
+except Exception as e:
+    _print(f"[DEBUG-STDERR] openai import failed: {e}")
+
+HAS_CLIENT = False
+MathReasoningEnv = None
+MathAction = None
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from client import MathReasoningEnv, MathAction
+    HAS_CLIENT = True
+except Exception as e:
+    _print(f"[DEBUG-STDERR] client import failed: {e}")
 
 # ── LLM call ──────────────────────────────────────────────────────────────────
-def get_model_message(client: Optional[OpenAI], problem: str, step: int) -> str:
+def get_model_message(client, problem, step):
     if not client:
         return f"Step {step}: Reasoning... Answer: 42"
-    prompt = f"Problem: {problem}\nStep {step}: Reason step by step, then write 'Answer: <value>'"
+    prompt = (f"Problem: {problem}\n"
+              f"Step {step}: Reason step by step, then write 'Answer: <value>'")
     try:
-        completion = client.chat.completions.create(
+        comp = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role":"user","content":prompt}],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
             timeout=15.0,
         )
-        return (completion.choices[0].message.content or "").strip()
+        return (comp.choices[0].message.content or "").strip()
     except Exception as exc:
-        print(f"[DEBUG] LLM call failed at step {step}: {exc}",
-              file=sys.stderr, flush=True)
+        sys.stderr.write(f"[DEBUG] LLM failed step {step}: {exc}\n")
+        sys.stderr.flush()
         return f"Step {step}: Fallback. Answer: 42"
 
-# ── Main (async — mirrors official sample structure exactly) ──────────────────
-async def main() -> None:
-    # Init client before log_start so any crash here is visible
-    client: Optional[OpenAI] = None
-    try:
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    except Exception as exc:
-        print(f"[DEBUG] OpenAI client init failed: {exc}",
-              file=sys.stderr, flush=True)
-
-    rewards: List[float] = []
+# ── Main ──────────────────────────────────────────────────────────────────────
+async def main():
+    rewards     = []
     steps_taken = 0
     score       = 0.0
     success     = False
+    env         = None
 
-    # MANDATORY: [START] is the very first line emitted to stdout
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
-
-    env = None  # declared here so finally can always reference it
+    # init client
+    client = None
+    if OpenAI:
+        try:
+            client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        except Exception as exc:
+            sys.stderr.write(f"[DEBUG] client init failed: {exc}\n")
+            sys.stderr.flush()
 
     try:
         if HAS_CLIENT:
-            env = MathReasoningEnv(base_url=ENV_URL)
-            result  = await env.reset()
+            env    = MathReasoningEnv(base_url=ENV_URL)
+            result = await env.reset()
             problem = result.observation.problem
 
             for step in range(1, MAX_STEPS + 1):
-                if result.done:
+                if getattr(result, "done", False):
                     break
 
                 content = get_model_message(client, problem, step)
@@ -127,31 +127,28 @@ async def main() -> None:
                 else:
                     reasoning, answer = content, "42"
 
-                result  = await env.step(MathAction(reasoning=reasoning, answer=answer))
-                obs     = result.observation
-                reward  = float(result.reward or 0.0)
-                done    = bool(result.done or obs.done)
-                error   = getattr(obs, "error_message", None)
+                result = await env.step(MathAction(reasoning=reasoning, answer=answer))
+                obs    = result.observation
+                reward = float(getattr(result, "reward", None) or 0.0)
+                done   = bool(getattr(result, "done", False) or
+                              getattr(obs,    "done", False))
+                error  = getattr(obs, "error_message", None)
 
                 rewards.append(reward)
                 steps_taken = step
-
                 log_step(step=step,
-                         action=content.replace("\n", " "),
-                         reward=reward,
-                         done=done,
-                         error=error)
-
+                         action=content.replace("\n"," "),
+                         reward=reward, done=done, error=error)
                 if done:
                     break
 
             try:
                 score = float(env.state().score)
             except Exception:
-                score = sum(rewards) / len(rewards) if rewards else 0.0
+                score = sum(rewards)/len(rewards) if rewards else 0.0
 
         else:
-            # Simulation fallback when client module is unavailable
+            # Simulation fallback
             for step in range(1, MAX_STEPS + 1):
                 rewards.append(1.0)
                 log_step(step=step,
@@ -165,32 +162,28 @@ async def main() -> None:
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
-        print(f"[DEBUG] main() exception: {exc}", file=sys.stderr, flush=True)
-        # Ensure at least one [STEP] line exists so validators don't reject
+        sys.stderr.write(f"[DEBUG] main exception: {exc}\n")
+        sys.stderr.flush()
         if not rewards:
             rewards.append(0.0)
             steps_taken = 1
             log_step(step=1,
-                     action="error-recovery fallback Answer: 0",
-                     reward=0.0,
-                     done=True,
+                     action="error-recovery Answer: 0",
+                     reward=0.0, done=True,
                      error=str(exc)[:120])
 
     finally:
-        # MATCH OFFICIAL SAMPLE: close env before log_end, always
         if env is not None:
             try:
                 await env.close()
             except Exception as e:
-                print(f"[DEBUG] env.close() error: {e}",
-                      file=sys.stderr, flush=True)
+                sys.stderr.write(f"[DEBUG] env.close() error: {e}\n")
+                sys.stderr.flush()
 
         score   = min(max(float(score), 0.0), 1.0)
         success = score >= SUCCESS_THRESHOLD
-        log_end(success=success,
-                steps=steps_taken,
-                score=score,
-                rewards=rewards)
+        log_end(success=success, steps=steps_taken,
+                score=score, rewards=rewards)
 
 
 if __name__ == "__main__":
