@@ -1,6 +1,9 @@
-import sys
 import os
-import asyncio
+import sys
+
+# Disable ALL stdout buffering immediately
+os.environ["PYTHONUNBUFFERED"] = "1"
+
 import logging
 from typing import List, Optional
 
@@ -21,13 +24,13 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 256
 SUCCESS_THRESHOLD = 0.5
 
-# ── Logging — plain print to stdout with flush=True ───────────────────────────
+# ── Structured logging ────────────────────────────────────────────────────────
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step, action, reward, done, error):
-    error_val  = error if error else "null"
-    done_val   = str(bool(done)).lower()
+    error_val   = error if error else "null"
+    done_val    = str(bool(done)).lower()
     action_safe = str(action).replace("\n", " ").replace("\r", " ").strip()[:150]
     print(f"[STEP] step={step} action={action_safe} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
@@ -35,17 +38,17 @@ def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(f"[END] success={str(bool(success)).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
-# ── [START] fires immediately — before any import that could crash ─────────────
+# ── [START] before anything that can crash ────────────────────────────────────
 log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
-# ── Risky imports after [START] ───────────────────────────────────────────────
+# ── Imports after [START] ─────────────────────────────────────────────────────
 OpenAI = None
 try:
     from openai import OpenAI
 except Exception as e:
     print(f"[DEBUG] openai import failed: {e}", file=sys.stderr, flush=True)
 
-HAS_CLIENT     = False
+HAS_CLIENT       = False
 MathReasoningEnv = None
 MathAction       = None
 try:
@@ -55,7 +58,7 @@ try:
 except Exception as e:
     print(f"[DEBUG] client import failed: {e}", file=sys.stderr, flush=True)
 
-# ── LLM call ──────────────────────────────────────────────────────────────────
+# ── LLM call (sync) ───────────────────────────────────────────────────────────
 def get_model_message(client, problem, step):
     if not client:
         return f"Step {step}: Reasoning... Answer: 42"
@@ -73,13 +76,12 @@ def get_model_message(client, problem, step):
         print(f"[DEBUG] LLM failed step {step}: {exc}", file=sys.stderr, flush=True)
         return f"Step {step}: Fallback. Answer: 42"
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-async def main():
+# ── Main (fully sync — matches client.py's .sync() context manager) ───────────
+def main():
     rewards     = []
     steps_taken = 0
     score       = 0.0
     success     = False
-    env         = None
 
     client = None
     if OpenAI:
@@ -90,39 +92,45 @@ async def main():
 
     try:
         if HAS_CLIENT:
-            env    = MathReasoningEnv(base_url=ENV_URL)
-            result = await env.reset()
-            problem = result.observation.problem
+            # Use .sync() context manager — works for BOTH openenv and fallback client
+            with MathReasoningEnv(base_url=ENV_URL).sync() as env:
+                result  = env.reset()
+                problem = result.observation.problem
 
-            for step in range(1, MAX_STEPS + 1):
-                if getattr(result, "done", False):
-                    break
+                for step in range(1, MAX_STEPS + 1):
+                    if getattr(result, "done", False):
+                        break
 
-                content = get_model_message(client, problem, step)
+                    content = get_model_message(client, problem, step)
 
-                if "Answer:" in content:
-                    reasoning, answer = content.split("Answer:", 1)
-                    reasoning, answer = reasoning.strip(), answer.strip()
-                else:
-                    reasoning, answer = content, "42"
+                    if "Answer:" in content:
+                        reasoning, answer = content.split("Answer:", 1)
+                        reasoning, answer = reasoning.strip(), answer.strip()
+                    else:
+                        reasoning, answer = content, "42"
 
-                result = await env.step(MathAction(reasoning=reasoning, answer=answer))
-                obs    = result.observation
-                reward = float(getattr(result, "reward", None) or 0.0)
-                done   = bool(getattr(result, "done", False) or getattr(obs, "done", False))
-                error  = getattr(obs, "error_message", None)
+                    result = env.step(MathAction(reasoning=reasoning, answer=answer))
+                    obs    = result.observation
+                    reward = float(getattr(result, "reward", None) or 0.0)
+                    done   = bool(getattr(result, "done", False) or getattr(obs, "done", False))
+                    # Sanitize feedback for validator (remove emoji/special chars)
+                    if hasattr(obs, "feedback") and not obs.correct and obs.feedback:
+                        error = obs.feedback.encode("ascii", "ignore").decode().strip()[:80]
+                    else:
+                        error = None
 
-                rewards.append(reward)
-                steps_taken = step
-                log_step(step=step, action=content.replace("\n", " "),
-                         reward=reward, done=done, error=error)
-                if done:
-                    break
+                    rewards.append(reward)
+                    steps_taken = step
+                    log_step(step=step, action=content.replace("\n", " "),
+                             reward=reward, done=done, error=error)
 
-            try:
-                score = float(env.state().score)
-            except Exception:
-                score = sum(rewards) / len(rewards) if rewards else 0.0
+                    if done:
+                        break
+
+                try:
+                    score = float(env.state().score)
+                except Exception:
+                    score = sum(rewards) / len(rewards) if rewards else 0.0
 
         else:
             # Simulation fallback
@@ -144,16 +152,10 @@ async def main():
                      reward=0.0, done=True, error=str(exc)[:120])
 
     finally:
-        if env is not None:
-            try:
-                await env.close()
-            except Exception as e:
-                print(f"[DEBUG] env.close() error: {e}", file=sys.stderr, flush=True)
-
         score   = min(max(float(score), 0.0), 1.0)
         success = score >= SUCCESS_THRESHOLD
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# Runs whether executed directly OR imported by the validator
+main()
