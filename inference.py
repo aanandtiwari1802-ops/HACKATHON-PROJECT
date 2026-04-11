@@ -7,13 +7,23 @@ STDOUT FORMAT:
   [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 """
 
-import os
-import sys
-import asyncio
-import textwrap
+# ── Print [START] immediately — before ANY other imports or logic ─────────────
+import os, sys
+print(
+    f"[START]"
+    f" task={os.getenv('TASK_NAME','math_reasoning')}"
+    f" env={os.getenv('BENCHMARK','math_reasoning_env')}"
+    f" model={os.getenv('MODEL_NAME','Qwen/Qwen2.5-72B-Instruct')}",
+    flush=True
+)
+
+# ── Now safe to do everything else ───────────────────────────────────────────
 import time
 import subprocess
+import textwrap
 import urllib.request
+import urllib.error
+import json
 from typing import List, Optional
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -42,12 +52,9 @@ try:
     _OPENAI_OK = True
 except ImportError:
     _OPENAI_OK = False
-    print("[DEBUG] openai not installed — using fallback", file=sys.stderr, flush=True)
+    print("[DEBUG] openai not installed", file=sys.stderr, flush=True)
 
 # ── Structured stdout helpers ─────────────────────────────────────────────────
-def log_start(task, env, model):
-    print(f"[START] task={task} env={env} model={model}", flush=True)
-
 def log_step(step, action, reward, done, error):
     a = str(action).replace("\n", " ").replace("\r", " ").strip()[:200]
     e = str(error).strip()[:120] if error else "null"
@@ -58,55 +65,60 @@ def log_end(success, steps, score, rewards):
     rs = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rs}", flush=True)
 
+# ── HTTP helpers (stdlib only — no requests needed) ───────────────────────────
+def http_post(url, payload):
+    data = json.dumps(payload).encode()
+    req  = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+def http_get(url):
+    with urllib.request.urlopen(url, timeout=15) as r:
+        return json.loads(r.read())
+
 # ── Docker helpers ────────────────────────────────────────────────────────────
-def start_docker(image: str, port: int) -> Optional[str]:
-    """Start the env server in a Docker container. Returns container ID or None."""
+def start_docker(image, port):
     try:
-        result = subprocess.run(
+        r = subprocess.run(
             ["docker", "run", "-d", "--rm", "-p", f"{port}:{port}", image],
             capture_output=True, text=True, timeout=60
         )
-        if result.returncode == 0:
-            container_id = result.stdout.strip()
-            print(f"[DEBUG] Docker container started: {container_id[:12]}", file=sys.stderr, flush=True)
-            return container_id
-        else:
-            print(f"[DEBUG] Docker run failed: {result.stderr.strip()}", file=sys.stderr, flush=True)
-            return None
+        if r.returncode == 0:
+            cid = r.stdout.strip()
+            print(f"[DEBUG] container started: {cid[:12]}", file=sys.stderr, flush=True)
+            return cid
+        print(f"[DEBUG] docker run failed: {r.stderr.strip()}", file=sys.stderr, flush=True)
+        return None
     except Exception as exc:
-        print(f"[DEBUG] Docker start error: {exc}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] docker start error: {exc}", file=sys.stderr, flush=True)
         return None
 
-def wait_for_server(url: str, timeout: int = 60) -> bool:
-    """Poll /health until the server is ready."""
-    health_url = f"{url}/health"
+def wait_for_server(url, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(health_url, timeout=2) as r:
+            with urllib.request.urlopen(f"{url}/health", timeout=2) as r:
                 if r.status == 200:
-                    print(f"[DEBUG] Server ready at {url}", file=sys.stderr, flush=True)
                     return True
         except Exception:
             pass
         time.sleep(2)
-    print(f"[DEBUG] Server did not become ready in {timeout}s", file=sys.stderr, flush=True)
     return False
 
-def stop_docker(container_id: str) -> None:
-    """Stop the Docker container."""
+def stop_docker(cid):
     try:
-        subprocess.run(["docker", "stop", container_id],
-                       capture_output=True, timeout=30)
-        print(f"[DEBUG] Docker container stopped: {container_id[:12]}", file=sys.stderr, flush=True)
-    except Exception as exc:
-        print(f"[DEBUG] Docker stop error: {exc}", file=sys.stderr, flush=True)
+        subprocess.run(["docker", "stop", cid], capture_output=True, timeout=30)
+    except Exception:
+        pass
 
 # ── LLM call ─────────────────────────────────────────────────────────────────
 def get_model_message(client, problem, step, last_feedback, history):
     if not _OPENAI_OK or client is None:
-        return "Reasoning: fallback mode.\nAnswer: 42"
-
+        return "Reasoning: fallback.\nAnswer: 42"
     history_block = "\n".join(history[-4:]) if history else "None"
     user_prompt = textwrap.dedent(f"""
         Problem: {problem}
@@ -116,7 +128,6 @@ def get_model_message(client, problem, step, last_feedback, history):
         {history_block}
         Reason step by step, then write 'Answer: <value>'
     """).strip()
-
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -126,7 +137,6 @@ def get_model_message(client, problem, step, last_feedback, history):
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
-            stream=False,
         )
         text = (completion.choices[0].message.content or "").strip()
         return text or "Answer: 42"
@@ -134,11 +144,8 @@ def get_model_message(client, problem, step, last_feedback, history):
         print(f"[DEBUG] LLM failed: {exc}", file=sys.stderr, flush=True)
         return "Answer: 42"
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-async def main():
-    # [START] MUST be the very first line of output
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
-
+# ── Main (synchronous — no asyncio needed) ────────────────────────────────────
+def main():
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if _OPENAI_OK else None
 
     rewards: List[float] = []
@@ -148,61 +155,64 @@ async def main():
     container_id = None
 
     try:
-        # ── Start Docker container ────────────────────────────────────────────
-        container_id = start_docker(IMAGE_NAME, ENV_PORT)
-        if container_id:
-            server_ready = wait_for_server(ENV_URL, timeout=60)
-        else:
-            server_ready = False
+        # ── Start server ──────────────────────────────────────────────────────
+        # First try connecting directly (in case server is already running)
+        server_ready = wait_for_server(ENV_URL, timeout=5)
 
         if not server_ready:
-            raise RuntimeError(f"Server at {ENV_URL} did not start (image={IMAGE_NAME})")
+            # Start via Docker
+            container_id = start_docker(IMAGE_NAME, ENV_PORT)
+            server_ready = wait_for_server(ENV_URL, timeout=60)
 
-        # ── Run episode ───────────────────────────────────────────────────────
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from client import MathReasoningEnv, MathAction
+        if not server_ready:
+            raise RuntimeError(f"Server at {ENV_URL} did not start")
 
-        with MathReasoningEnv(base_url=ENV_URL).sync() as env:
-            result        = env.reset()
-            problem       = result.observation.problem
-            last_feedback = ""
-            history: List[str] = []
+        # ── Episode ───────────────────────────────────────────────────────────
+        reset_resp    = http_post(f"{ENV_URL}/reset", {})
+        obs_data      = reset_resp.get("observation", reset_resp)
+        problem       = obs_data.get("problem", "What is 2 + 2?")
+        last_feedback = ""
+        history: List[str] = []
 
-            for step in range(1, MAX_STEPS + 1):
-                if getattr(result, "done", False):
-                    break
+        for step in range(1, MAX_STEPS + 1):
+            if obs_data.get("done", False):
+                break
 
-                content = get_model_message(client, problem, step, last_feedback, history)
+            content = get_model_message(client, problem, step, last_feedback, history)
 
-                if "Answer:" in content:
-                    reasoning, answer = content.split("Answer:", 1)
-                    reasoning, answer = reasoning.strip(), answer.strip()
-                else:
-                    reasoning, answer = content, "42"
+            if "Answer:" in content:
+                reasoning, answer = content.split("Answer:", 1)
+                reasoning, answer = reasoning.strip(), answer.strip()
+            else:
+                reasoning, answer = content, "42"
 
-                result = env.step(MathAction(reasoning=reasoning, answer=answer))
-                obs    = result.observation
-                reward = float(getattr(result, "reward", None) or 0.0)
-                done   = bool(getattr(result, "done", False) or getattr(obs, "done", False))
-                error  = None
+            step_resp = http_post(f"{ENV_URL}/step", {
+                "reasoning": reasoning,
+                "answer": answer
+            })
+            obs_data      = step_resp.get("observation", step_resp)
+            reward        = float(step_resp.get("reward", obs_data.get("reward", 0.0)) or 0.0)
+            done          = bool(step_resp.get("done", obs_data.get("done", False)))
+            error         = None
 
-                fb = getattr(obs, "feedback", "")
-                if fb and not getattr(obs, "correct", True):
-                    error = fb.encode("ascii", "ignore").decode().strip()[:80]
-                last_feedback = fb
+            if not obs_data.get("correct", True):
+                fb = obs_data.get("feedback", "")
+                error = fb[:80] if fb else None
+            last_feedback = obs_data.get("feedback", "")
 
-                rewards.append(reward)
-                steps_taken = step
-                log_step(step, content.replace("\n", " "), reward, done, error)
-                history.append(f"Step {step}: answer={answer!r} reward={reward:+.2f}")
+            rewards.append(reward)
+            steps_taken = step
+            log_step(step, content.replace("\n", " "), reward, done, error)
+            history.append(f"Step {step}: answer={answer!r} reward={reward:+.2f}")
 
-                if done:
-                    break
+            if done:
+                break
 
-            try:
-                score = float(env.state().score)
-            except Exception:
-                score = sum(rewards) / len(rewards) if rewards else 0.0
+        try:
+            state_data = http_get(f"{ENV_URL}/state")
+            score      = float(state_data.get("score", 0.0))
+        except Exception:
+            score = sum(rewards) / len(rewards) if rewards else 0.0
 
     except Exception as exc:
         print(f"[DEBUG] episode failed: {exc}", file=sys.stderr, flush=True)
@@ -219,4 +229,4 @@ async def main():
         log_end(success, steps_taken, score, rewards)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
