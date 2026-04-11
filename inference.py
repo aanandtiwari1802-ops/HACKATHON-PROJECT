@@ -7,10 +7,6 @@ os.environ["PYTHONUNBUFFERED"] = "1"
 import logging
 from typing import List, Optional
 
-logging.basicConfig(level=logging.ERROR)
-for _n in ["openai", "httpx", "urllib3", "asyncio"]:
-    logging.getLogger(_n).setLevel(logging.ERROR)
-
 # ── Config ────────────────────────────────────────────────────────────────────
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "no-key-provided"
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
@@ -24,39 +20,56 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 256
 SUCCESS_THRESHOLD = 0.5
 
-# ── Structured logging ────────────────────────────────────────────────────────
+# ── Structured logging (Strictly regex-compatible) ───────────────────────────
 def log_start(task, env, model):
+    # Ensure this is the absolute first line of output
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step, action, reward, done, error):
-    error_val   = error if error else "null"
-    done_val    = str(bool(done)).lower()
-    action_safe = str(action).replace("\n", " ").replace("\r", " ").strip()[:150]
+    # Replace ALL spaces with underscores in string values to avoid breaking space-split parsers
+    action_safe = str(action).replace("\n"," ").replace("\r"," ").replace(" ", "_").strip()[:150]
+    error_val   = str(error).replace(" ", "_").strip() if error else "null"
+    done_val    = "true" if bool(done) else "false"
     print(f"[STEP] step={step} action={action_safe} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 def log_end(success, steps, score, rewards):
+    success_val = "true" if bool(success) else "false"
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-    print(f"[END] success={str(bool(success)).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(f"[END] success={success_val} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
-# ── [START] before anything that can crash ────────────────────────────────────
+# ── Emit [START] before any non-stdlib imports ───────────────────────────────
 log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
-# ── Imports after [START] ─────────────────────────────────────────────────────
-OpenAI = None
-try:
-    from openai import OpenAI
-except Exception as e:
-    print(f"[DEBUG] openai import failed: {e}", file=sys.stderr, flush=True)
+# ── Silence library initialization noise ──────────────────────────────────────
+import contextlib
+@contextlib.contextmanager
+def silence_output():
+    with open(os.devnull, "w") as fnull:
+        # We only really need to silence stdout to protect the log stream
+        with contextlib.redirect_stdout(fnull):
+            yield
 
-HAS_CLIENT       = False
-MathReasoningEnv = None
-MathAction       = None
-try:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from client import MathReasoningEnv, MathAction
-    HAS_CLIENT = True
-except Exception as e:
-    print(f"[DEBUG] client import failed: {e}", file=sys.stderr, flush=True)
+with silence_output():
+    logging.basicConfig(level=logging.ERROR)
+    for _n in ["openai", "httpx", "urllib3", "asyncio"]:
+        logging.getLogger(_n).setLevel(logging.ERROR)
+
+    # ── Risky imports after [START] ───────────────────────────────────────────
+    OpenAI = None
+    try:
+        from openai import OpenAI
+    except Exception as e:
+        sys.stderr.write(f"[DEBUG] openai import failed: {e}\n")
+
+    HAS_CLIENT       = False
+    MathReasoningEnv = None
+    MathAction       = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from client import MathReasoningEnv, MathAction
+        HAS_CLIENT = True
+    except Exception as e:
+        sys.stderr.write(f"[DEBUG] client import failed: {e}\n")
 
 # ── LLM call (sync) ───────────────────────────────────────────────────────────
 def get_model_message(client, problem, step):
@@ -144,11 +157,12 @@ def main():
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
-        print(f"[DEBUG] main exception: {exc}", file=sys.stderr, flush=True)
+        sys.stderr.write(f"[DEBUG] main exception: {exc}\n")
+        sys.stderr.flush()
         if not rewards:
             rewards.append(0.0)
             steps_taken = 1
-            log_step(step=1, action="error-recovery Answer: 0",
+            log_step(step=1, action="error-recovery_Answer:_0",
                      reward=0.0, done=True, error=str(exc)[:120])
 
     finally:
