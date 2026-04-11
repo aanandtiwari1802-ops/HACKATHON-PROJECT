@@ -1,4 +1,4 @@
-spec_version: "0.2.0"
+spec_version: 1
 name: math_reasoning_env
 type: space
 runtime: fastapi
@@ -6,22 +6,19 @@ app: server.app:app
 port: 8000
 
 tasks:
-  - id: "easy_arithmetic"
-    name: "Easy Arithmetic"
+  - name: easy_arithmetic
     description: Single-step arithmetic problems (addition, subtraction, multiplication, division)
     difficulty: easy
     max_steps: 3
     grader: "tasks.easy_arithmetic:grade"
 
-  - id: "medium_algebra"
-    name: "Medium Algebra"
+  - name: medium_algebra
     description: Multi-step algebra and word problems (equations, speed-distance-time)
     difficulty: medium
     max_steps: 3
     grader: "tasks.medium_algebra:grade"
 
-  - id: "hard_reasoning"
-    name: "Hard Reasoning"
+  - name: hard_reasoning
     description: Complex multi-step algebra and word problems (quadratics, pipes, logarithms)
     difficulty: hard
     max_steps: 3
