@@ -82,6 +82,30 @@ def _tasks_payload() -> dict:
     }
 
 
+def _grade_task(task_name: str, payload: dict) -> dict:
+    """Shared grading logic used by both grade endpoints."""
+    obs = payload.get("observation", {
+        "correct": True,
+        "reward": 1.0,
+        "done": True,
+        "hint": "",
+        "difficulty": task_name,
+    })
+    action = payload.get("action", None)
+
+    if task_name == "easy_arithmetic":
+        from tasks.easy_arithmetic import grade
+    elif task_name == "medium_algebra":
+        from tasks.medium_algebra import grade
+    elif task_name == "hard_reasoning":
+        from tasks.hard_reasoning import grade
+    else:
+        return {"error": f"Unknown task: {task_name}"}
+
+    score = grade(observation=obs, action=action)
+    return {"task": task_name, "score": score}
+
+
 # ---------------------------------------------------------------------------
 # Code path A: fallback (no openenv-core installed)
 # ---------------------------------------------------------------------------
@@ -128,6 +152,19 @@ except ImportError:
     def get_tasks():
         """Return all available tasks with grader info — required by OpenEnv validator."""
         return _tasks_payload()
+
+    # ── Grade per task (required by OpenEnv validator) ──────────────────────
+    @app.post("/tasks/{task_name}/grade")
+    def grade_task(task_name: str, payload: dict = {}):
+        """Run the grader for a specific task — required by OpenEnv validator."""
+        return _grade_task(task_name, payload)
+
+    # ── Flat grade endpoint (alternative validator entry point) ─────────────
+    @app.post("/grade")
+    def grade_flat(payload: dict = {}):
+        """Flat grade endpoint — alternative validator entry point."""
+        task_name = payload.get("task", "easy_arithmetic")
+        return _grade_task(task_name, payload)
 
     # ── Reset ───────────────────────────────────────────────────────────────
     @app.post("/reset")
@@ -225,6 +262,19 @@ else:
     def get_tasks():
         """Return all available tasks with grader info — required by OpenEnv validator."""
         return _tasks_payload()
+
+    # ── Grade per task (required by OpenEnv validator) ──────────────────────
+    @app.post("/tasks/{task_name}/grade")
+    def grade_task(task_name: str, payload: dict = {}):
+        """Run the grader for a specific task — required by OpenEnv validator."""
+        return _grade_task(task_name, payload)
+
+    # ── Flat grade endpoint (alternative validator entry point) ─────────────
+    @app.post("/grade")
+    def grade_flat(payload: dict = {}):
+        """Flat grade endpoint — alternative validator entry point."""
+        task_name = payload.get("task", "easy_arithmetic")
+        return _grade_task(task_name, payload)
 
     # ── Global error handler ─────────────────────────────────────────────────
     from fastapi.responses import JSONResponse
