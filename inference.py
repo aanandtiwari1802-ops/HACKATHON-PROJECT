@@ -1,28 +1,25 @@
 """
 Inference Script for Math Reasoning Environment
 ================================================
-STDOUT FORMAT (required):
+STDOUT FORMAT:
   [START] task=<name> env=<benchmark> model=<model>
   [STEP]  step=<n> action=<str> reward=<0.00> done=<true|false> error=<msg|null>
   [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 """
 
-import asyncio
 import os
 import sys
+import asyncio
 import textwrap
 from typing import List, Optional
 
-from openai import OpenAI
-
 # ── Config ────────────────────────────────────────────────────────────────────
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME   = os.getenv("MODEL_NAME")  or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME    = os.getenv("TASK_NAME",  "math_reasoning_env")
-BENCHMARK    = os.getenv("BENCHMARK",  "math_reasoning_env")
-ENV_URL      = os.getenv("ENV_URL",    "http://localhost:8000").strip()
-
+API_KEY       = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "dummy-key"
+API_BASE_URL  = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME    = os.getenv("MODEL_NAME")  or "Qwen/Qwen2.5-72B-Instruct"
+TASK_NAME     = os.getenv("TASK_NAME",  "math_reasoning")
+BENCHMARK     = os.getenv("BENCHMARK",  "math_reasoning_env")
+ENV_URL       = os.getenv("ENV_URL",    "http://localhost:8000").strip()
 MAX_STEPS         = 3
 TEMPERATURE       = 0.2
 MAX_TOKENS        = 512
@@ -30,35 +27,39 @@ SUCCESS_THRESHOLD = 0.5
 
 SYSTEM_PROMPT = textwrap.dedent("""
     You are a math reasoning assistant.
-    For each problem, reason step by step and then provide your final answer.
-    Always end your response with exactly: Answer: <value>
-    where <value> is just the number or expression, nothing else.
+    Reason step by step, then end with: Answer: <value>
+    <value> must be only the number or expression, nothing else.
 """).strip()
 
+# ── Guard openai import — never let a missing package kill stdout ─────────────
+try:
+    from openai import OpenAI
+    _OPENAI_OK = True
+except ImportError:
+    _OPENAI_OK = False
+    print("[DEBUG] openai not installed — using fallback", file=sys.stderr, flush=True)
+
 # ── Structured stdout helpers ─────────────────────────────────────────────────
-def log_start(task: str, env: str, model: str) -> None:
+def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    action_safe = str(action).replace("\n", " ").replace("\r", " ").strip()[:200]
-    error_val   = str(error).strip()[:120] if error else "null"
-    done_val    = "true" if done else "false"
-    print(
-        f"[STEP] step={step} action={action_safe} reward={reward:.2f} done={done_val} error={error_val}",
-        flush=True,
-    )
+def log_step(step, action, reward, done, error):
+    a = str(action).replace("\n", " ").replace("\r", " ").strip()[:200]
+    e = str(error).strip()[:120] if error else "null"
+    d = "true" if done else "false"
+    print(f"[STEP] step={step} action={a} reward={reward:.2f} done={d} error={e}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
-        flush=True,
-    )
+def log_end(success, steps, score, rewards):
+    rs = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rs}", flush=True)
 
-# ── Prompt builder ────────────────────────────────────────────────────────────
-def build_user_prompt(problem: str, step: int, last_feedback: str, history: List[str]) -> str:
+# ── LLM call ─────────────────────────────────────────────────────────────────
+def get_model_message(client, problem, step, last_feedback, history):
+    if not _OPENAI_OK or client is None:
+        return "Reasoning: fallback mode.\nAnswer: 42"
+
     history_block = "\n".join(history[-4:]) if history else "None"
-    return textwrap.dedent(f"""
+    user_prompt = textwrap.dedent(f"""
         Problem: {problem}
         Step: {step}
         Last feedback: {last_feedback or 'None'}
@@ -67,10 +68,6 @@ def build_user_prompt(problem: str, step: int, last_feedback: str, history: List
         Reason step by step, then write 'Answer: <value>'
     """).strip()
 
-# ── LLM call ──────────────────────────────────────────────────────────────────
-def get_model_message(client: OpenAI, problem: str, step: int,
-                      last_feedback: str, history: List[str]) -> str:
-    user_prompt = build_user_prompt(problem, step, last_feedback, history)
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -83,39 +80,32 @@ def get_model_message(client: OpenAI, problem: str, step: int,
             stream=False,
         )
         text = (completion.choices[0].message.content or "").strip()
-        return text if text else "Answer: 42"
+        return text or "Answer: 42"
     except Exception as exc:
-        print(f"[DEBUG] Model request failed: {exc}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] LLM failed: {exc}", file=sys.stderr, flush=True)
         return "Answer: 42"
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-
-    history:     List[str]   = []
-    rewards:     List[float] = []
-    steps_taken: int         = 0
-    score:       float       = 0.0
-    success:     bool        = False
-
+async def main():
+    # [START] is ALWAYS the very first line printed — no exceptions
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
-    # Import env client (done here so [START] is always printed first)
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if _OPENAI_OK else None
+
+    rewards: List[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
+
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from client import MathReasoningEnv, MathAction
-    except Exception as exc:
-        print(f"[DEBUG] client import failed: {exc}", file=sys.stderr, flush=True)
-        # Emit a minimal fallback so validator gets [END]
-        log_step(step=1, action="import-error", reward=0.0, done=True, error=str(exc)[:120])
-        log_end(success=False, steps=1, score=0.0, rewards=[0.0])
-        return
 
-    try:
         with MathReasoningEnv(base_url=ENV_URL).sync() as env:
             result        = env.reset()
             problem       = result.observation.problem
             last_feedback = ""
+            history: List[str] = []
 
             for step in range(1, MAX_STEPS + 1):
                 if getattr(result, "done", False):
@@ -135,16 +125,14 @@ async def main() -> None:
                 done   = bool(getattr(result, "done", False) or getattr(obs, "done", False))
                 error  = None
 
-                if hasattr(obs, "feedback") and not getattr(obs, "correct", True) and obs.feedback:
-                    error = obs.feedback.encode("ascii", "ignore").decode().strip()[:80]
-                    last_feedback = obs.feedback
-                else:
-                    last_feedback = ""
+                fb = getattr(obs, "feedback", "")
+                if fb and not getattr(obs, "correct", True):
+                    error = fb.encode("ascii", "ignore").decode().strip()[:80]
+                last_feedback = fb
 
                 rewards.append(reward)
                 steps_taken = step
-                log_step(step=step, action=content.replace("\n", " "),
-                         reward=reward, done=done, error=error)
+                log_step(step, content.replace("\n", " "), reward, done, error)
                 history.append(f"Step {step}: answer={answer!r} reward={reward:+.2f}")
 
                 if done:
@@ -155,20 +143,17 @@ async def main() -> None:
             except Exception:
                 score = sum(rewards) / len(rewards) if rewards else 0.0
 
-        success = score >= SUCCESS_THRESHOLD
-
     except Exception as exc:
-        print(f"[DEBUG] main exception: {exc}", file=sys.stderr, flush=True)
+        print(f"[DEBUG] episode failed: {exc}", file=sys.stderr, flush=True)
         if not rewards:
-            rewards.append(0.0)
+            rewards     = [0.0]
             steps_taken = 1
-            log_step(step=1, action="error-recovery", reward=0.0, done=True, error=str(exc)[:120])
+            log_step(1, "error-recovery", 0.0, True, str(exc)[:120])
 
     finally:
         score   = min(max(float(score), 0.0), 1.0)
         success = score >= SUCCESS_THRESHOLD
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
-
+        log_end(success, steps_taken, score, rewards)
 
 if __name__ == "__main__":
     asyncio.run(main())
