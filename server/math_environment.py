@@ -270,11 +270,15 @@ def _is_correct(submitted: str, ground_truth: str) -> bool:
 
 
 def _reward_for_attempt(attempt_number: int, correct: bool) -> float:
-    """Calculate reward based on correctness and attempt number."""
+    """Calculate reward based on correctness and attempt number.
+
+    Scores must be strictly between 0 and 1 (validator requirement),
+    so rewards are clamped to [0.01, 0.99].
+    """
     if not correct:
-        return -0.1
-    rewards = {1: 1.0, 2: 0.5, 3: 0.2}
-    return rewards.get(attempt_number, 0.1)
+        return 0.01  # was -0.1; negatives are out-of-range for score field
+    rewards = {1: 0.99, 2: 0.75, 3: 0.50}
+    return rewards.get(attempt_number, 0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +393,8 @@ class MathReasoningEnvironment(Environment):
             self._correct_episodes += 1
             self._episode_done = True
             self._state.correct_episodes = self._correct_episodes
-            self._state.score = self._correct_episodes / self._total_episodes
+            raw_score = self._correct_episodes / self._total_episodes
+            self._state.score = min(max(raw_score, 0.01), 0.99)  # strictly (0, 1)
             feedback = (
                 f"✅ Correct! The answer is {self._current_problem['answer']}. "
                 f"You solved it in {self._attempts} attempt(s). "
@@ -397,7 +402,7 @@ class MathReasoningEnvironment(Environment):
             )
         elif attempts_remaining == 0:
             self._episode_done = True
-            reward = -0.5
+            reward = 0.01  # was -0.5; keep strictly > 0
             feedback = (
                 f"❌ Incorrect. The correct answer was {self._current_problem['answer']}. "
                 f"You used all {self.MAX_STEPS_PER_EPISODE} attempts. Reward: {reward}"

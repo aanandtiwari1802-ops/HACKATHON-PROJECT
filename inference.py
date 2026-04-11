@@ -224,7 +224,7 @@ def main():
     finally:
         if container_id:
             stop_docker(container_id)
-        score   = min(max(float(score), 0.0), 1.0)
+        score   = min(max(float(score), 0.01), 0.99)  # strictly inside (0, 1)
         success = score >= SUCCESS_THRESHOLD
         log_end(success, steps_taken, score, rewards)
 
