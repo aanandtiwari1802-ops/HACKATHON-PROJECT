@@ -11,6 +11,9 @@ import os
 import sys
 import asyncio
 import textwrap
+import time
+import subprocess
+import urllib.request
 from typing import List, Optional
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -19,7 +22,9 @@ API_BASE_URL  = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME    = os.getenv("MODEL_NAME")  or "Qwen/Qwen2.5-72B-Instruct"
 TASK_NAME     = os.getenv("TASK_NAME",  "math_reasoning")
 BENCHMARK     = os.getenv("BENCHMARK",  "math_reasoning_env")
-ENV_URL       = os.getenv("ENV_URL",    "http://localhost:8000").strip()
+IMAGE_NAME    = os.getenv("IMAGE_NAME") or os.getenv("LOCAL_IMAGE_NAME", "math-reasoning-env:latest")
+ENV_PORT      = int(os.getenv("ENV_PORT", "8000"))
+ENV_URL       = f"http://localhost:{ENV_PORT}"
 MAX_STEPS         = 3
 TEMPERATURE       = 0.2
 MAX_TOKENS        = 512
@@ -31,7 +36,7 @@ SYSTEM_PROMPT = textwrap.dedent("""
     <value> must be only the number or expression, nothing else.
 """).strip()
 
-# ── Guard openai import — never let a missing package kill stdout ─────────────
+# ── Guard openai import ───────────────────────────────────────────────────────
 try:
     from openai import OpenAI
     _OPENAI_OK = True
@@ -52,6 +57,50 @@ def log_step(step, action, reward, done, error):
 def log_end(success, steps, score, rewards):
     rs = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rs}", flush=True)
+
+# ── Docker helpers ────────────────────────────────────────────────────────────
+def start_docker(image: str, port: int) -> Optional[str]:
+    """Start the env server in a Docker container. Returns container ID or None."""
+    try:
+        result = subprocess.run(
+            ["docker", "run", "-d", "--rm", "-p", f"{port}:{port}", image],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode == 0:
+            container_id = result.stdout.strip()
+            print(f"[DEBUG] Docker container started: {container_id[:12]}", file=sys.stderr, flush=True)
+            return container_id
+        else:
+            print(f"[DEBUG] Docker run failed: {result.stderr.strip()}", file=sys.stderr, flush=True)
+            return None
+    except Exception as exc:
+        print(f"[DEBUG] Docker start error: {exc}", file=sys.stderr, flush=True)
+        return None
+
+def wait_for_server(url: str, timeout: int = 60) -> bool:
+    """Poll /health until the server is ready."""
+    health_url = f"{url}/health"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(health_url, timeout=2) as r:
+                if r.status == 200:
+                    print(f"[DEBUG] Server ready at {url}", file=sys.stderr, flush=True)
+                    return True
+        except Exception:
+            pass
+        time.sleep(2)
+    print(f"[DEBUG] Server did not become ready in {timeout}s", file=sys.stderr, flush=True)
+    return False
+
+def stop_docker(container_id: str) -> None:
+    """Stop the Docker container."""
+    try:
+        subprocess.run(["docker", "stop", container_id],
+                       capture_output=True, timeout=30)
+        print(f"[DEBUG] Docker container stopped: {container_id[:12]}", file=sys.stderr, flush=True)
+    except Exception as exc:
+        print(f"[DEBUG] Docker stop error: {exc}", file=sys.stderr, flush=True)
 
 # ── LLM call ─────────────────────────────────────────────────────────────────
 def get_model_message(client, problem, step, last_feedback, history):
@@ -87,7 +136,7 @@ def get_model_message(client, problem, step, last_feedback, history):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 async def main():
-    # [START] is ALWAYS the very first line printed — no exceptions
+    # [START] MUST be the very first line of output
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if _OPENAI_OK else None
@@ -96,8 +145,20 @@ async def main():
     steps_taken = 0
     score = 0.0
     success = False
+    container_id = None
 
     try:
+        # ── Start Docker container ────────────────────────────────────────────
+        container_id = start_docker(IMAGE_NAME, ENV_PORT)
+        if container_id:
+            server_ready = wait_for_server(ENV_URL, timeout=60)
+        else:
+            server_ready = False
+
+        if not server_ready:
+            raise RuntimeError(f"Server at {ENV_URL} did not start (image={IMAGE_NAME})")
+
+        # ── Run episode ───────────────────────────────────────────────────────
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from client import MathReasoningEnv, MathAction
 
@@ -151,6 +212,8 @@ async def main():
             log_step(1, "error-recovery", 0.0, True, str(exc)[:120])
 
     finally:
+        if container_id:
+            stop_docker(container_id)
         score   = min(max(float(score), 0.0), 1.0)
         success = score >= SUCCESS_THRESHOLD
         log_end(success, steps_taken, score, rewards)
