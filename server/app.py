@@ -46,6 +46,7 @@ def _tasks_payload() -> dict:
     return {
         "tasks": [
             {
+                "id": "easy_arithmetic",
                 "name": "easy_arithmetic",
                 "description": (
                     "Single-step arithmetic problems "
@@ -57,6 +58,7 @@ def _tasks_payload() -> dict:
                 "sample_score": _run_sample_grade("easy"),
             },
             {
+                "id": "medium_algebra",
                 "name": "medium_algebra",
                 "description": (
                     "Multi-step algebra and word problems "
@@ -68,6 +70,7 @@ def _tasks_payload() -> dict:
                 "sample_score": _run_sample_grade("medium"),
             },
             {
+                "id": "hard_reasoning",
                 "name": "hard_reasoning",
                 "description": (
                     "Complex multi-step algebra and word problems "
