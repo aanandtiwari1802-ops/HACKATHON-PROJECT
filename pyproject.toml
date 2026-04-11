@@ -40,4 +40,4 @@ server = "math_reasoning_env.server.app:main"
 [tool.setuptools]
 include-package-data = true
 packages = ["math_reasoning_env", "math_reasoning_env.server"]
-package-dir = { "math_reasoning_env" = ".", "math_reasoning_env.server" = "server" }
+package-dir = { "" = "." }

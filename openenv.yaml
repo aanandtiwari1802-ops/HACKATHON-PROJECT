@@ -2,7 +2,7 @@ spec_version: 1
 name: math_reasoning_env
 type: space
 runtime: fastapi
-app: server.app:app
+app: math_reasoning_env.server.app:app
 port: 8000
 
 tasks:
