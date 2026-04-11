@@ -35,9 +35,8 @@ dev = [
 ]
 
 [project.scripts]
-server = "math_reasoning_env.server.app:main"
+server = "server.app:main"
 
 [tool.setuptools]
+packages = ["server"]
 include-package-data = true
-packages = ["math_reasoning_env", "math_reasoning_env.server"]
-package-dir = { "" = "." }
