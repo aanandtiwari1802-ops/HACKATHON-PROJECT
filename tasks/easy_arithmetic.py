@@ -1,22 +1,38 @@
 """
-Grader for the easy_arithmetic task.
-
-The grader receives the episode result and returns a score
-strictly between 0 and 1 (exclusive), as required by the validator.
+Grader for easy_arithmetic task.
+Single-step arithmetic: addition, subtraction, multiplication, division.
+Returns a score in [0.0, 1.0] based on correctness and attempt efficiency.
 """
 
-
-def grade(episode_result: dict) -> float:
+def grade(*, observation, action=None, state=None, trajectory=None, **kwargs) -> float:
     """
-    Score an easy_arithmetic episode.
+    Score an episode step for the easy_arithmetic task.
 
     Args:
-        episode_result: dict with keys such as 'reward', 'correct',
-                        'attempts', 'score', produced by the environment.
+        observation: MathObservation object (or dict) from the environment.
+        action:      MathAction that produced this observation (optional).
+        state:       MathState at the time of grading (optional).
+        trajectory:  Full episode trajectory list (optional).
+        **kwargs:    Forward-compat catch-all.
 
     Returns:
-        float strictly in (0, 1).
+        float in [0.0, 1.0] — higher is better.
     """
-    raw = float(episode_result.get("score", episode_result.get("reward", 0.5)))
-    # Clamp strictly inside (0, 1) — validator rejects 0.0 and 1.0
-    return max(0.01, min(raw, 0.99))
+    # Accept both object-style and dict-style observations
+    if isinstance(observation, dict):
+        correct = observation.get("correct", False)
+        reward  = float(observation.get("reward", 0.0))
+        done    = observation.get("done", False)
+    else:
+        correct = getattr(observation, "correct", False)
+        reward  = float(getattr(observation, "reward", 0.0))
+        done    = getattr(observation, "done", False)
+
+    # Normalize reward from env range [-0.5, 1.0] → [0.0, 1.0]
+    score = (reward + 0.5) / 1.5
+
+    # Hard cap: if episode ended without a correct answer, score is 0
+    if done and not correct:
+        score = 0.0
+
+    return max(0.0, min(1.0, score))

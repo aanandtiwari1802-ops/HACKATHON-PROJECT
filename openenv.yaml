@@ -6,19 +6,22 @@ app: server.app:app
 port: 8000
 
 tasks:
-  - name: easy_arithmetic
+  - id: "easy_arithmetic"
+    name: "Easy Arithmetic"
     description: Single-step arithmetic problems (addition, subtraction, multiplication, division)
     difficulty: easy
     max_steps: 3
     grader: "tasks.easy_arithmetic:grade"
 
-  - name: medium_algebra
+  - id: "medium_algebra"
+    name: "Medium Algebra"
     description: Multi-step algebra and word problems (equations, speed-distance-time)
     difficulty: medium
     max_steps: 3
     grader: "tasks.medium_algebra:grade"
 
-  - name: hard_reasoning
+  - id: "hard_reasoning"
+    name: "Hard Reasoning"
     description: Complex multi-step algebra and word problems (quadratics, pipes, logarithms)
     difficulty: hard
     max_steps: 3

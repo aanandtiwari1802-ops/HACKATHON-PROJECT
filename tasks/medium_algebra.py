@@ -1,22 +1,35 @@
 """
-Grader for the medium_algebra task.
-
-The grader receives the episode result and returns a score
-strictly between 0 and 1 (exclusive), as required by the validator.
+Grader for medium_algebra task.
+Multi-step algebra and word problems (equations, speed-distance-time).
+Penalizes use of hints (shown on 3rd wrong attempt) slightly.
 """
 
-
-def grade(episode_result: dict) -> float:
+def grade(*, observation, action=None, state=None, trajectory=None, **kwargs) -> float:
     """
-    Score a medium_algebra episode.
-
-    Args:
-        episode_result: dict with keys such as 'reward', 'correct',
-                        'attempts', 'score', produced by the environment.
+    Score an episode step for the medium_algebra task.
 
     Returns:
-        float strictly in (0, 1).
+        float in [0.0, 1.0].
     """
-    raw = float(episode_result.get("score", episode_result.get("reward", 0.5)))
-    # Clamp strictly inside (0, 1) — validator rejects 0.0 and 1.0
-    return max(0.01, min(raw, 0.99))
+    if isinstance(observation, dict):
+        correct           = observation.get("correct", False)
+        reward            = float(observation.get("reward", 0.0))
+        done              = observation.get("done", False)
+        hint_was_shown    = bool(observation.get("hint", ""))
+    else:
+        correct           = getattr(observation, "correct", False)
+        reward            = float(getattr(observation, "reward", 0.0))
+        done              = getattr(observation, "done", False)
+        hint_was_shown    = bool(getattr(observation, "hint", ""))
+
+    # Normalize reward [-0.5, 1.0] → [0.0, 1.0]
+    score = (reward + 0.5) / 1.5
+
+    # Apply a small penalty if the agent needed a hint
+    if correct and hint_was_shown:
+        score = max(0.0, score - 0.1)
+
+    if done and not correct:
+        score = 0.0
+
+    return max(0.0, min(1.0, score))
