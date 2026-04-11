@@ -402,7 +402,7 @@ class MathReasoningEnvironment(Environment):
             )
         elif attempts_remaining == 0:
             self._episode_done = True
-            reward = 0.01  # was -0.5; keep strictly > 0
+            reward = -0.5
             feedback = (
                 f"❌ Incorrect. The correct answer was {self._current_problem['answer']}. "
                 f"You used all {self.MAX_STEPS_PER_EPISODE} attempts. Reward: {reward}"

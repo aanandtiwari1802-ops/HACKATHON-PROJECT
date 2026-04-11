@@ -10,28 +10,16 @@ tasks:
     description: Single-step arithmetic problems (addition, subtraction, multiplication, division)
     difficulty: easy
     max_steps: 3
-    grader:
-      type: score
-      field: score
-      min: 0.0
-      max: 1.0
+    grader: "tasks.easy_arithmetic:grade"
 
   - name: medium_algebra
     description: Multi-step algebra and word problems (equations, speed-distance-time)
     difficulty: medium
     max_steps: 3
-    grader:
-      type: score
-      field: score
-      min: 0.0
-      max: 1.0
+    grader: "tasks.medium_algebra:grade"
 
   - name: hard_reasoning
     description: Complex multi-step algebra and word problems (quadratics, pipes, logarithms)
     difficulty: hard
     max_steps: 3
-    grader:
-      type: score
-      field: score
-      min: 0.0
-      max: 1.0
+    grader: "tasks.hard_reasoning:grade"
