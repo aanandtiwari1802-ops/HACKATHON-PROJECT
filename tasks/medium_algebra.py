@@ -4,13 +4,20 @@ Multi-step algebra and word problems (equations, speed-distance-time).
 Penalizes use of hints (shown on 3rd wrong attempt) slightly.
 """
 
-def grade(*, observation, action=None, state=None, trajectory=None, **kwargs) -> float:
+def grade(episode=None, *, observation=None, action=None, state=None, trajectory=None, **kwargs) -> float:
     """
     Score an episode step for the medium_algebra task.
 
     Returns:
         float in [0.0, 1.0].
     """
+    if episode is not None and observation is None:
+        if isinstance(episode, list) and len(episode) > 0:
+            last_step = episode[-1]
+            observation = last_step.get("observation", last_step) if isinstance(last_step, dict) else getattr(last_step, "observation", last_step)
+        else:
+            observation = episode.get("observation", episode) if isinstance(episode, dict) else getattr(episode, "observation", episode)
+
     if isinstance(observation, dict):
         correct           = observation.get("correct", False)
         reward            = float(observation.get("reward", 0.0))

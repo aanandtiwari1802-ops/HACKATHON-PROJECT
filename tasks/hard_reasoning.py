@@ -6,7 +6,7 @@ Rewards clean chain-of-thought reasoning in addition to correctness.
 
 _MIN_REASONING_WORDS = 10  # Expect substantive reasoning for hard problems
 
-def grade(*, observation, action=None, state=None, trajectory=None, **kwargs) -> float:
+def grade(episode=None, *, observation=None, action=None, state=None, trajectory=None, **kwargs) -> float:
     """
     Score an episode step for the hard_reasoning task.
 
@@ -16,6 +16,17 @@ def grade(*, observation, action=None, state=None, trajectory=None, **kwargs) ->
     Returns:
         float in [0.0, 1.0].
     """
+    if episode is not None and observation is None:
+        if isinstance(episode, list) and len(episode) > 0:
+            last_step = episode[-1]
+            observation = last_step.get("observation", last_step) if isinstance(last_step, dict) else getattr(last_step, "observation", last_step)
+            if action is None:
+                action = last_step.get("action", None) if isinstance(last_step, dict) else getattr(last_step, "action", None)
+        else:
+            observation = episode.get("observation", episode) if isinstance(episode, dict) else getattr(episode, "observation", episode)
+            if action is None:
+                action = episode.get("action", None) if isinstance(episode, dict) else getattr(episode, "action", None)
+
     if isinstance(observation, dict):
         correct        = observation.get("correct", False)
         reward         = float(observation.get("reward", 0.0))
