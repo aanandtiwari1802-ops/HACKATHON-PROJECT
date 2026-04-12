@@ -1,58 +1,28 @@
 """
-Grader for hard_reasoning task.
-Complex multi-step algebra and word problems (quadratics, pipes, logarithms).
-Rewards clean chain-of-thought reasoning in addition to correctness.
+Grader for hard_reasoning tasks.
+
+Signature: grade(episode: dict) -> float
+Score must be strictly between 0.0 and 1.0 (exclusive).
 """
+from __future__ import annotations
 
-_MIN_REASONING_WORDS = 10  # Expect substantive reasoning for hard problems
 
-def grade(episode=None, *, observation=None, action=None, state=None, trajectory=None, **kwargs) -> float:
-    """
-    Score an episode step for the hard_reasoning task.
+def grade(episode: dict) -> float:
+    success: bool    = bool(episode.get("success", False))
+    steps: int       = int(episode.get("steps", 1))
+    rewards: list    = episode.get("rewards", [])
+    env_score: float = float(episode.get("score", 0.0))
 
-    Adds a small bonus (up to 0.1) when the agent produces a detailed
-    chain-of-thought reasoning string, as expected for hard problems.
-
-    Returns:
-        float in [0.0, 1.0].
-    """
-    if episode is not None and observation is None:
-        if isinstance(episode, list) and len(episode) > 0:
-            last_step = episode[-1]
-            observation = last_step.get("observation", last_step) if isinstance(last_step, dict) else getattr(last_step, "observation", last_step)
-            if action is None:
-                action = last_step.get("action", None) if isinstance(last_step, dict) else getattr(last_step, "action", None)
+    if success:
+        if steps <= 1:
+            return 0.99   # perfect — but strictly < 1.0
+        elif steps == 2:
+            return 0.50
         else:
-            observation = episode.get("observation", episode) if isinstance(episode, dict) else getattr(episode, "observation", episode)
-            if action is None:
-                action = episode.get("action", None) if isinstance(episode, dict) else getattr(episode, "action", None)
+            return 0.20
 
-    if isinstance(observation, dict):
-        correct        = observation.get("correct", False)
-        reward         = float(observation.get("reward", 0.0))
-        done           = observation.get("done", False)
-    else:
-        correct        = getattr(observation, "correct", False)
-        reward         = float(getattr(observation, "reward", 0.0))
-        done           = getattr(observation, "done", False)
+    if rewards:
+        avg = sum(rewards) / len(rewards)
+        return round(max(0.01, min(0.09, avg)), 4)
 
-    # Normalize reward [-0.5, 1.0] → [0.0, 1.0]
-    score = (reward + 0.5) / 1.5
-
-    if done and not correct:
-        return 0.0
-
-    # Reasoning quality bonus
-    if action is not None:
-        reasoning = ""
-        if isinstance(action, dict):
-            reasoning = action.get("reasoning", "")
-        else:
-            reasoning = getattr(action, "reasoning", "")
-        word_count = len(reasoning.split())
-        if correct and word_count >= _MIN_REASONING_WORDS:
-            # Bonus scales up to 0.1 for 30+ word reasoning chains
-            bonus = min(0.1, word_count / 300)
-            score = min(1.0, score + bonus)
-
-    return max(0.0, min(1.0, score))
+    return round(max(0.01, min(0.09, env_score if env_score > 0 else 0.01)), 4)

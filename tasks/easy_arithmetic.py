@@ -1,46 +1,29 @@
 """
-Grader for easy_arithmetic task.
-Single-step arithmetic: addition, subtraction, multiplication, division.
-Returns a score in [0.0, 1.0] based on correctness and attempt efficiency.
+Grader for easy_arithmetic tasks.
+
+Signature: grade(episode: dict) -> float
+Score must be strictly between 0.0 and 1.0 (exclusive).
 """
+from __future__ import annotations
 
-def grade(episode=None, *, observation=None, action=None, state=None, trajectory=None, **kwargs) -> float:
-    """
-    Score an episode step for the easy_arithmetic task.
 
-    Args:
-        episode:     Full episode passed by the OpenEnv Validator.
-        observation: MathObservation object (or dict) from the environment.
-        action:      MathAction that produced this observation (optional).
-        state:       MathState at the time of grading (optional).
-        trajectory:  Full episode trajectory list (optional).
-        **kwargs:    Forward-compat catch-all.
+def grade(episode: dict) -> float:
+    success: bool    = bool(episode.get("success", False))
+    steps: int       = int(episode.get("steps", 1))
+    rewards: list    = episode.get("rewards", [])
+    env_score: float = float(episode.get("score", 0.0))
 
-    Returns:
-        float in [0.0, 1.0] — higher is better.
-    """
-    if episode is not None and observation is None:
-        if isinstance(episode, list) and len(episode) > 0:
-            last_step = episode[-1]
-            observation = last_step.get("observation", last_step) if isinstance(last_step, dict) else getattr(last_step, "observation", last_step)
+    if success:
+        if steps <= 1:
+            return 0.99   # perfect — but strictly < 1.0
+        elif steps == 2:
+            return 0.60
         else:
-            observation = episode.get("observation", episode) if isinstance(episode, dict) else getattr(episode, "observation", episode)
+            return 0.30
 
-    # Accept both object-style and dict-style observations
-    if isinstance(observation, dict):
-        correct = observation.get("correct", False)
-        reward  = float(observation.get("reward", 0.0))
-        done    = observation.get("done", False)
-    else:
-        correct = getattr(observation, "correct", False)
-        reward  = float(getattr(observation, "reward", 0.0))
-        done    = getattr(observation, "done", False)
+    # Not solved — partial credit, strictly > 0.0
+    if rewards:
+        avg = sum(rewards) / len(rewards)
+        return round(max(0.01, min(0.19, avg)), 4)
 
-    # Normalize reward from env range [-0.5, 1.0] → [0.0, 1.0]
-    score = (reward + 0.5) / 1.5
-
-    # Hard cap: if episode ended without a correct answer, score is 0
-    if done and not correct:
-        score = 0.0
-
-    return max(0.0, min(1.0, score))
+    return round(max(0.01, min(0.19, env_score if env_score > 0 else 0.01)), 4)
